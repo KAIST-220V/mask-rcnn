@@ -16,6 +16,9 @@ Usage: import the module (see Jupyter notebooks for examples), or run from
     # Train a new model starting from ImageNet weights
     python3 solar_panel.py train --dataset=/path/to/solar_panel/dataset --weights=imagenet
 
+    # Test a mAP accuracy of given model
+    python3 solar_panel.py test --dataset=/path/to/solar_panel/dataset --weights=/path/to/weights/file.h5
+
     # Detect solar panel in an image and display it
     python3 solar_panel.py detect --weights=/path/to/weights/file.h5 --image=<URL or path to file>
 """
@@ -90,7 +93,7 @@ class SolarPanelDataset(utils.Dataset):
         self.add_class("solar-panel", 1, "solar-panel")
 
         # Train or validation dataset?
-        assert subset in ["train", "val"]
+        assert subset in ["train", "val", "test"]
         annotations_dir = os.path.join(dataset_dir, subset)
 
         # Load annotations from json
@@ -170,8 +173,8 @@ class SolarPanelDataset(utils.Dataset):
             rr, cc = skimage.draw.polygon(p["all_points_y"], p["all_points_x"])
             mask[rr, cc, i] = 1
 
-        # Return mask, and array of class IDs of each instance. Since we have
-        # one class ID only, we return an array of 1s
+        # Return mask, and array of class IDs of each instance.
+        # Since we have one class ID only, we return an array of 1s
         return mask.astype(bool), np.ones([mask.shape[-1]], dtype=np.int32)
 
     def image_reference(self, image_id):
@@ -207,6 +210,50 @@ def train(model):
         epochs=100,
         layers="heads",
     )
+
+
+def test(model, limit=50):
+    """
+    Test the model.
+
+    """
+    from mrcnn.utils import extract_bboxes, compute_ap
+
+    APs = []
+
+    # Test dataset
+    dataset_test = SolarPanelDataset()
+    dataset_test.load_solar_panel(args.dataset, "test")
+    dataset_test.prepare()
+
+    # Loop through each image in the validation dataset
+    for image_id in dataset_test.image_ids[:limit]:
+        # Load the image and ground truth data
+        image = dataset_test.load_image(image_id)
+        gt_masks, gt_class_ids = dataset_test.load_mask(image_id)
+        gt_boxes = extract_bboxes(gt_masks)
+
+        # Run object detection
+        results = model.detect([image], verbose=0)
+        r = results[0]
+
+        # Compute AP
+        AP, precisions, recalls, overlaps = compute_ap(
+            gt_boxes,
+            gt_class_ids,
+            gt_masks,
+            r["rois"],
+            r["class_ids"],
+            r["scores"],
+            r["masks"],
+        )
+        APs.append(AP)
+
+    # Calculate the mean of all APs
+    mAP = np.mean(APs)
+    print(f"Mean Average Precision (mAP) @IoU-0.5: {mAP}")
+
+    return mAP
 
 
 def detect(model, image_path=None):
@@ -285,8 +332,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Validate arguments
-    if args.command == "train":
-        assert args.dataset, "Argument --dataset is required for training"
+    if args.command in ["train", "test"]:
+        assert args.dataset, "Argument --dataset is required for training/testing"
 
     elif args.command == "detect":
         assert args.image, "Provide --image to apply detection"
@@ -295,10 +342,11 @@ if __name__ == "__main__":
     print("Dataset: ", args.dataset)
     print("Logs: ", args.logs)
 
-    # Configurations
+    # Configurations for training
     if args.command == "train":
         config = SolarPanelConfig()
 
+    # Configurations for testing/detecting
     else:
 
         class InferenceConfig(SolarPanelConfig):
@@ -311,7 +359,7 @@ if __name__ == "__main__":
 
     config.display()
 
-    # Create model
+    # Create model for training
     if args.command == "train":
         model = modellib.MaskRCNN(
             mode="training",
@@ -319,6 +367,7 @@ if __name__ == "__main__":
             model_dir=args.logs,
         )
 
+    # Create model for testing/detecting
     else:
         model = modellib.MaskRCNN(
             mode="inference",
@@ -365,12 +414,16 @@ if __name__ == "__main__":
     else:
         model.load_weights(weights_path, by_name=True)
 
-    # Train or detect
-    if args.command == "train":
-        train(model)
+    # Execute given command
+    match args.command:
+        case "train":
+            train(model)
+        case "test":
+            mAP = test(model)
+            with open("result.log", "a") as f:
+                f.write(f"{mAP}\n")
 
-    elif args.command == "detect":
-        detect(model, image_path=args.image)
-
-    else:
-        print(f"'{args.command}' is not recognized. Use 'train' or 'detect'")
+        case "detect":
+            detect(model, image_path=args.image)
+        case _:
+            print(f"'{args.command}' is not recognized.")

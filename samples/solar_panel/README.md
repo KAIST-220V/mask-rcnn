@@ -56,3 +56,9 @@ python3 solar_panel.py train --dataset=/path/to/balloon/dataset --weights=imagen
 ```
 
 The code in `solar_panel.py` is set to train for 10K steps (100 epochs of 100 steps each), and using a batch size of 2. Update the schedule to fit your needs.
+
+## Test the model accuracy (mAP @IoU-0.5)
+
+```
+python3 solar_panel.py test --dataset=/path/to/solar_panel/dataset --weights=/path/to/weights/file.h5
+```
