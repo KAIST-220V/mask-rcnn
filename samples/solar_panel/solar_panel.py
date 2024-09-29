@@ -99,16 +99,17 @@ class SolarPanelDataset(utils.Dataset):
         with open(os.path.join(annotations_dir, "annotations.json")) as fp:
             json_data = json.load(fp)
 
-        # Initialize images and annotations
+        # Create images into dictionary
         images = {image["id"]: image for image in json_data["images"]}
-        annotations = {}
 
-        # Create annotations into dictionary.
-        for annotation in json_data["annotations"]:
-            if (image_id := annotation["image_id"]) not in annotations:
-                annotations[image_id] = []
+        # Create annotations into dictionary
+        from collections import defaultdict
 
-            annotations[image_id].append(annotation)
+        annotations = defaultdict(list)
+        {
+            annotations[annotation["image_id"]].append(annotation)
+            for annotation in json_data["annotations"]
+        }
 
         # Print load result
         print(f"loaded {len(images)} images.")
@@ -149,7 +150,7 @@ class SolarPanelDataset(utils.Dataset):
     def load_mask(self, image_id):
         """
         Generate instance masks for an image.
-        
+
         Returns:
             masks: A bool array of shape [height, width, instance count] with one mask per instance.
             class_ids: a 1D array of class IDs of the instance masks.
