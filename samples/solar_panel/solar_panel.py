@@ -30,7 +30,7 @@ import numpy as np
 import skimage.draw
 
 # Root directory of the project
-ROOT_DIR = os.path.abspath("../../")
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
 
 # Import Mask RCNN
 sys.path.append(ROOT_DIR)  # To find local version of the library
