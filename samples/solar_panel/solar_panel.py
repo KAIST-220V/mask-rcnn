@@ -306,12 +306,14 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--dataset",
+        "-d",
         required=False,
         metavar="/path/to/solar_panel/datasets/",
         help="Directory of the solar panel datasets",
     )
     parser.add_argument(
         "--weights",
+        "-w",
         required=True,
         metavar="/path/to/weights.h5",
         help="Path to weights .h5 file or 'coco'",
@@ -325,6 +327,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--image",
+        "-i",
         required=False,
         metavar="path or URL to image",
         help="Image to detect solar panel",
