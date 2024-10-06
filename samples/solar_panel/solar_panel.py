@@ -28,6 +28,8 @@ import sys
 import json
 import numpy as np
 import skimage.draw
+import skimage.io
+import skimage.util
 
 # Root directory of the project
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
@@ -261,36 +263,256 @@ def test(model, limit=50):
     return mAP
 
 
-def detect(model, image_path=None):
+def save_image(image, dest, rois, contours, class_ids, scores):
+    import matplotlib.pyplot as plt
+    from matplotlib import patches
+    from matplotlib.patches import Polygon
+
+    from mrcnn.visualize import random_colors
+
+    # Number of instances
+    num_rois = rois.shape[0]
+
+    if not num_rois:
+        print("\n*** No instances to display ***\n")
+
+    else:
+        assert rois.shape[0] == len(contours) == class_ids.shape[0]
+
+    # Create new axis
+    _, ax = plt.subplots(1, figsize=(16, 16))
+
+    # Generate random colors
+    colors = random_colors(num_rois)
+
+    # Show area outside image boundaries.
+    ax.axis("off")
+
+    for i in range(num_rois):
+        color = colors[i]
+
+        # Bounding box
+        if not np.any(rois[i]):
+            # Skip this instance.
+            # Has no bbox. Likely lost in image cropping.
+            continue
+
+        y1, x1, y2, x2 = rois[i]
+
+        # Display boundary box (bbox)
+        p = patches.Rectangle(
+            (x1, y1),
+            x2 - x1,
+            y2 - y1,
+            linewidth=2,
+            alpha=0.7,
+            linestyle="dashed",
+            edgecolor=color,
+            facecolor="none",
+        )
+        ax.add_patch(p)
+
+        # Add captions
+        class_id = class_ids[i]
+        class_names = ["BG", "solar-panel"]
+        score = scores[i] if scores is not None else None
+        label = class_names[class_id]
+        caption = f"{label} {score:.3f}" if score else label
+        ax.text(x1, y1 + 8, caption, color="w", size=11, backgroundcolor="none")
+
+        # Mask Polygon
+        for verts in contours:
+            # Skip if no verts are available
+            if len(verts) == 0:
+                continue
+
+            # Subtract the padding and flip (y, x) to (x, y)
+            verts = np.fliplr(verts) - 1
+            p = Polygon(verts, facecolor=color, edgecolor=color, alpha=0.1)
+            ax.add_patch(p)
+
+    ax.imshow(image.astype(np.uint8))
+
+    # Save the plot.
+    plt.savefig(dest)
+
+
+def detect(
+    model,
+    image_path,
+    split=False,
+    output_image_path=None,
+    output_json_path=None,
+):
     """
     Detect solar panel from the given image.
 
     """
-    if image_path:
-        # Run model detection and display result
-        print(f"Running on {args.image}")
+    from skimage.measure import find_contours, approximate_polygon
 
-        # Read image
-        image = skimage.io.imread(args.image)
+    # Run model detection and display result
+    print(f"Running on {image_path}")
 
-        # Use only first three color channel
-        if image.shape[-1] == 4:
-            image = image[..., :3]
+    # Read image
+    image = skimage.io.imread(image_path)
+    h, w, *_ = image.shape
 
+    # Set block size
+    bh, bw = 1024, 1024
+
+    # Crop and adjust color channel of image
+    image = image[: bh * (h // bh), : bw * (w // bw), :3]
+    h, w, *_ = image.shape
+
+    if split:
+        # Split image into blocks
+        block_shape = (bh, bw, 3)
+        blocks = skimage.util.view_as_blocks(image, block_shape=block_shape)
+        cols, rows, *_ = blocks.shape
+
+        # Initialize empty result lists
+        all_rois = []
+        all_contours = []
+        all_class_ids = []
+        all_scores = []
+
+        # Iterate every blocks
+        for i in range(cols):
+            for j in range(rows):
+                print(f"working on block({i}, {j})...")
+
+                y = i * bh
+                x = j * bw
+
+                # Get the block image
+                block = blocks[i, j]
+
+                # Run detection using model
+                result = model.detect(block, verbose=1)[0]
+
+                # Skip result digesting if instance does not exist
+                if (N := result["rois"].shape[0]) == 0:
+                    continue
+
+                # Add offset to result rois
+                result["rois"] += np.array([y, x, y, x])
+
+                # Mask Polygon
+                for idx in range(N):
+                    mask = result["masks"][..., idx]
+
+                    # Pad to ensure proper polygons for masks
+                    # that touch image edges.
+                    padded_mask = np.zeros(
+                        (h + 2, w + 2),
+                        dtype=np.uint8,
+                    )
+                    padded_mask[1 + y : 1 + y + bh, 1 + x : 1 + x + bw] = mask
+
+                    # Find contours from padded mask and simplify it.
+                    if contour := find_contours(padded_mask, 0.5):
+                        verts = approximate_polygon(contour[0], tolerance=2.0)
+
+                    # TODO: Why this happens? Find out why.
+                    else:
+                        verts = []
+
+                    # Append vertices to all_verts
+                    all_contours.append(verts)
+
+                # Append result to result lists
+                all_rois.append(result["rois"])
+                all_class_ids.append(result["class_ids"])
+                all_scores.append(result["scores"])
+
+        # Return if there's no instances
+        if len(all_rois) == 0:
+            print("\n*** No instances to display ***\n")
+            return
+
+        # Concatenate each result lists
+        rois = np.concatenate(all_rois, axis=0)
+        class_ids = np.concatenate(all_class_ids, axis=0)
+        scores = np.concatenate(all_scores, axis=0)
+
+        # Use `all_contours` directly
+        contours = all_contours
+
+    else:
         # Detect objects
-        r = model.detect([image], verbose=1)[0]
+        result = model.detect([image], verbose=1)[0]
 
-        # Visualize the detected objects.
-        import mrcnn.visualize
+        # Initialize variables
+        N = result["rois"].shape[0]
+        contours = []
 
-        mrcnn.visualize.display_instances(
-            image=image,
-            boxes=r["rois"],
-            masks=r["masks"],
-            class_ids=r["class_ids"],
-            class_names=["BG", "solar-panel"],
-            scores=r["scores"],
+        # Mask Polygon
+        for idx in range(N):
+            mask = result["masks"][..., idx]
+
+            # Pad to ensure proper polygons for masks
+            # that touch image edges.
+            padded_mask = np.zeros(
+                (h + 2, w + 2),
+                dtype=np.uint8,
+            )
+            padded_mask[1:-1, 1:-1] = mask
+
+            # Find contours from padded mask and simplify it.
+            contour = find_contours(padded_mask, 0.5)[0]
+            verts = approximate_polygon(contour, tolerance=2.0)
+
+            # Append vertices to vertices list
+            contours.append(verts)
+
+        # Use result from model directly
+        rois = result["rois"]
+        class_ids = result["class_ids"]
+        scores = result["scores"]
+
+    # Return output image for input image
+    if output_image_path:
+        masked_image = image.astype(np.uint32).copy()
+        save_image(
+            masked_image,
+            output_image_path,
+            rois,
+            contours,
+            class_ids,
+            scores,
         )
+
+    # Return output json for input image
+    if output_json_path:
+        result_json = {
+            "image_id": os.path.basename(image_path),
+            "image_size": {
+                "width": w,
+                "height": h,
+            },
+            "panel": [],
+        }
+
+        for verts in contours:
+            # Skip if no verts are available
+            if len(verts) == 0:
+                continue
+
+            all_points_y, all_points_x = zip(*verts)
+
+            # Add polygon to result json
+            result_json["panel"].append(
+                {
+                    "shape_attributes": {
+                        "all_points_x": all_points_x,
+                        "all_points_y": all_points_y,
+                        "name": "polygon",
+                    }
+                }
+            )
+
+        with open(output_json_path, "w") as fp:
+            json.dump(result_json, fp)
 
 
 ############################################################
@@ -336,6 +558,25 @@ if __name__ == "__main__":
         required=False,
         metavar="path or URL to image",
         help="Image to detect solar panel",
+    )
+    parser.add_argument(
+        "--output-image",
+        required=False,
+        metavar="/path/to/output/image",
+        help="Output image file path",
+    )
+    parser.add_argument(
+        "--output-json",
+        required=False,
+        metavar="/path/to/output/json",
+        help="Output json file path",
+    )
+    parser.add_argument(
+        "--split",
+        "-s",
+        required=False,
+        action="store_true",
+        help="Enable image splitting",
     )
     args = parser.parse_args()
 
@@ -432,6 +673,12 @@ if __name__ == "__main__":
                 f.write(f"{mAP}\n")
 
         case "detect":
-            detect(model, image_path=args.image)
+            detect(
+                model,
+                image_path=args.image,
+                split=args.split,
+                output_image_path=args.output_image,
+                output_json_path=args.output_json,
+            )
         case _:
             print(f"'{args.command}' is not recognized.")
