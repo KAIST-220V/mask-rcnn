@@ -44,6 +44,11 @@ COCO_WEIGHTS_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
 # through the command line argument --logs
 DEFAULT_LOGS_DIR = os.path.join(ROOT_DIR, "logs")
 
+# ignore decompression bomb attack warning
+from PIL import Image
+
+Image.MAX_IMAGE_PIXELS = None
+
 ############################################################
 #  Configurations
 ############################################################
