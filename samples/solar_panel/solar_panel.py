@@ -332,11 +332,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Validate arguments
-    if args.command in ["train", "test"]:
-        assert args.dataset, "Argument --dataset is required for training/testing"
-
-    elif args.command == "detect":
-        assert args.image, "Provide --image to apply detection"
+    match args.command:
+        case "train" | "test":
+            msg_error = "Dataset is required for training/testing"
+            assert args.dataset, msg_error
+        case "detect":
+            msg_error = "Provide image to apply detection"
+            assert args.image, msg_error
 
     print("Weights: ", args.weights)
     print("Dataset: ", args.dataset)
@@ -376,23 +378,21 @@ if __name__ == "__main__":
         )
 
     # Select weights file to load
-    if args.weights.lower() == "coco":
-        weights_path = COCO_WEIGHTS_PATH
+    match args.weights.lower():
+        case "coco":
+            weights_path = COCO_WEIGHTS_PATH
 
-        # Download weights file
-        if not os.path.exists(weights_path):
-            utils.download_trained_weights(weights_path)
-
-    elif args.weights.lower() == "last":
-        # Find last trained weights
-        weights_path = model.find_last()
-
-    elif args.weights.lower() == "imagenet":
-        # Start from ImageNet trained weights
-        weights_path = model.get_imagenet_weights()
-
-    else:
-        weights_path = args.weights
+            # Download weights file
+            if not os.path.exists(weights_path):
+                utils.download_trained_weights(weights_path)
+        case "last":
+            # Find last trained weights
+            weights_path = model.find_last()
+        case "imagenet":
+            # Start from ImageNet trained weights
+            weights_path = model.get_imagenet_weights()
+        case _:
+            weights_path = args.weights
 
     # Load weights
     print(f"Loading weights from {weights_path}")
