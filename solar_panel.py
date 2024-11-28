@@ -32,7 +32,9 @@ import skimage.io
 import skimage.util
 
 # Root directory of the project
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent
 
 # Import Mask RCNN
 sys.path.append(ROOT_DIR)  # To find local version of the library
@@ -40,11 +42,11 @@ from mrcnn.config import Config
 from mrcnn import model as modellib, utils
 
 # Path to trained weights file
-COCO_WEIGHTS_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
+COCO_WEIGHTS_PATH = ROOT_DIR / "mask_rcnn_coco.h5"
 
 # Directory to save logs and model checkpoints, if not provided
 # through the command line argument --logs
-DEFAULT_LOGS_DIR = os.path.join(ROOT_DIR, "logs")
+DEFAULT_LOGS_DIR = ROOT_DIR / "logs"
 
 # ignore decompression bomb attack warning
 from PIL import Image
@@ -682,7 +684,7 @@ if __name__ == "__main__":
                     output_image_path=args.output_image,
                     output_json_path=args.output_json,
                 )
-                
+
                 shutil.move(f"{args.image}/{image}", f"/root/images-done/{image}")
 
         case _:
